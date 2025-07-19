@@ -1,0 +1,9 @@
+[package]
+name = "cricket"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.13"
+bevy_input = "0.13"
+rand = "0.9.1"
