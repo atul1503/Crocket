@@ -1,11 +1,34 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::GameWindow;
+#[derive(Component)]
+pub struct PlayingCondition {
+    pub gravity: f32,
+    pub wind: f32,
+    pub pitch_friction: f32,
+    pub pitch_hardness: f32
+}
 
-/// Gets directions between point a and b with randomness such that the more the randomness the more the direction might point away from the actual direction.
-/// Positive negative for direction will mean left or right.
-pub fn get_direction(point_a: Vec3, point_b: Vec3,randomness: f32) -> Vec3 {
+impl Default for PlayingCondition {
+     fn default() -> Self {
+        Self {
+            /// gravity best value is 0.0208695652
+            gravity: 0.0208695652,
+            /// wind drift for x axis
+            wind: 0.0,
+            /// affects ball speed after pitch and grip
+            pitch_friction: 0.05,
+            pitch_hardness: 0.95
+        }
+    }
+
+
+}
+
+
+/// Gets velocity vector between point a and b with randomness such that the more the randomness the more the velocity might point away from the actual velocity.
+/// Positive negative for velocity will mean left or right.
+pub fn get_velocity(point_a: Vec3, point_b: Vec3,randomness: f32) -> Vec3 {
     if (point_a-point_b).length() == 0. {
         println!("{} and {} are the same bro!",point_a,point_b);
         return Vec3::ZERO;

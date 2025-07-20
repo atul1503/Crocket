@@ -28,21 +28,22 @@ struct Player {
 
 #[derive(Component)]
 struct Ball {
-    /// speed at which ball should go from bowler to batter
-    speed: f32,
     did_bowler_throw: bool,
     /// is ball out of camera window
     is_out_of_bounds: bool,
+    /// did the ball touch the pitch
+    did_bounce: bool,
     did_batsman_hit: bool,
-    /// direction in which the ball is going right now
-    direction: Vec3,
+    /// velocity in which the ball is going right now
+    velocity: Vec3,
     game_window: GameWindow,
     /// bowler's coordinate
-    bowler_coord: Vec3
+    bowler_coord: Vec3,
+
 }
 
 
-impl<'a> Ball {
+impl Ball {
     
 /// move the ball coord back to the batsman
 pub fn move_to_baller(&mut self, coord: &mut Vec3) {
@@ -51,12 +52,54 @@ pub fn move_to_baller(&mut self, coord: &mut Vec3) {
         self.did_bowler_throw=false;
 } 
 
-    /// move object with speed and in this direction exactly
-pub fn move_object(&mut self,object_vector: &mut Vec3,direction: Vec3) {
-    *object_vector+=direction*self.speed;   
 
-    //println!("current y {}, y check at {}",object_vector.y,self.game_window.height);
-    if (object_vector.x>self.game_window.width || object_vector.x < -self.game_window.width) || (object_vector.y>self.game_window.height || object_vector.y < -self.game_window.height) {
+/// throws the ball from bowler to batsman
+pub fn throw_ball(&mut self,time: Time,transform: &mut Transform,conditions: &PlayingCondition) {
+
+    let mut coord=&mut transform.translation;
+    if !self.did_bounce {
+        //println!("time {}",time.delta_seconds());
+        println!("velocity before gravity {:?}",self.velocity);
+        self.velocity+=Vec3::new(0.,-conditions.gravity,0.)*time.delta_seconds();
+        println!("velocity after gravity {:?}",self.velocity);
+        //println!("Before wind {}",coord);
+        self.velocity+=Vec3::new(conditions.wind,0.,0.)*time.delta_seconds();
+        //println!("After wind {}",coord);
+        //println!("coord before pitching {:?}",coord);
+        if coord.y < 0. {
+                coord.y=0.;
+                self.did_bounce=true;
+                self.velocity*=conditions.pitch_hardness;
+                self.velocity*=(1.0-conditions.pitch_friction);
+                //println!("coord {:?}",coord);
+            }
+    }
+    else {
+        if self.velocity.y<0. {
+            self.velocity.y=-self.velocity.y;
+        }
+        //println!("velocity {:?}",self.velocity);
+        //println!("Before applying speed {:?}",coord);
+        //println!("After applying speed {:?}",coord);
+        //println!("Before gravity {:?}",coord);
+        self.velocity+=Vec3::new(0.,-conditions.gravity,0.)*time.delta_seconds();
+        //println!("After gravity {:?}",coord);
+        self.velocity+=Vec3::new(conditions.wind,0.,0.)*time.delta_seconds();
+        //println!("coord after pitching {:?}",coord);
+    }
+    //println!("velocity {:?}",self.velocity);
+    *coord+=self.velocity*time.delta_seconds();
+    //println!("coord {:?}",coord);
+
+
+}
+
+    /// move object with speed and in this velocity exactly
+pub fn move_object(&mut self,object_vector: &mut Vec3,velocity: Vec3) {
+    //*object_vector+=velocity*self.speed;   
+
+    //println!("current z {}, z check at {}",object_vector.z,self.game_window.height);
+    if (object_vector.z>self.game_window.width || object_vector.z < -self.game_window.width) || (object_vector.y>self.game_window.height || object_vector.z < -self.game_window.height) {
         //println!("out of bounds");
         self.is_out_of_bounds=true;
     } 
@@ -73,56 +116,77 @@ struct GameWindow {
 }
 
 
-fn setup(mut commands: Commands,game_window: Query<&GameWindow,With<GameWindow>>,windows: Query<&Window,With<PrimaryWindow>>, mut meshes: ResMut<Assets<Mesh>>,mut materials: ResMut<Assets<ColorMaterial>>) {
-    commands.spawn(Camera2dBundle::default());
+fn setup(mut commands: Commands,game_window: Query<&GameWindow,With<GameWindow>>,windows: Query<&Window,With<PrimaryWindow>>, mut meshes: ResMut<Assets<Mesh>>,mut materials: ResMut<Assets<StandardMaterial>>) {
+    // Camera - side view looking at origin (classic cricket side-on angle)
+    commands.spawn(Camera3dBundle {
+        transform: Transform::from_xyz(15.0, 8.0, 0.0)
+        .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+        ..default()
+    });
+
+    commands.spawn((PlayingCondition::default()));
+
+    // Add lighting - this is crucial for 3D!
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            shadows_enabled: true,
+            illuminance: 1000.0,
+            ..default()
+        },
+        transform: Transform {
+            translation: Vec3::new(0.0, 2.0, 0.0),
+            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_4),
+            ..default()
+        },
+        ..default()
+    });
 
     commands.spawn(GameWindow{
         height: windows.single().height(),
         width: windows.single().width()
     });
 
-    // for batsman
+    // for batsman - make bigger
     commands.spawn((
-        SpriteBundle {
-            sprite: Sprite {
-                color: Color::rgb(0.3, 0.7, 0.9),
-                custom_size: Some(Vec2::new(100., 50.)),
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(Cuboid::new(2.0, 3.0, 1.0))), // Bigger
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.3, 0.7, 0.9),
                 ..default()
-            },
-            transform: Transform { translation: Vec3 { x: 0., y: windows.single().height()/2.1, z: 1. }, 
-                ..default()
-             },
-             ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, 11.0),
+            ..default()
         },
-        Player {name: String::from("Batsman") },
+        Player {
+            name: String::from("Batsman"),
+        },
     ));
-
-
-    // for bowler
+    
+    // for bowler - convert to 3D PbrBundle
     commands.spawn((
-        SpriteBundle {
-            sprite: Sprite {
-                color: Color::rgb(0.3, 0.7, 0.9),
-                custom_size: Some(Vec2::new(100., 50.)),
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(Cuboid::new(2.0, 3.0, 1.0))), // Bigger
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.7, 0.3, 0.9), // Different color from batsman
                 ..default()
-            },
-            transform: Transform { translation: Vec3 { x: 0., y: -windows.single().height()/2.1, z: 1. }, 
-                ..default()
-             },
-             ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, -11.0),
+            ..default()
         },
         Player {name: String::from("Bowler")},
     ));
 
-    // for ball
-    commands.spawn((MaterialMesh2dBundle {
-        mesh: meshes.add(Mesh::from(shape::Circle::new(15.))).into(),
-        material: materials.add(Color::rgb(0.8, 0.2,0.9)).into(),
-        transform: Transform::from_xyz(-50.,-windows.single().height()/2.3, 2.) ,
+    // for ball - make bigger
+    commands.spawn((PbrBundle {
+        mesh: meshes.add(Mesh::from(Sphere::new(0.3))), // Bigger ball
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgb(0.8, 0.2, 0.9),
+            ..default()
+        }),
+        transform: Transform::from_xyz(0.0,3.5, -11.0) ,
         ..default()
     },
-    Ball {is_out_of_bounds:false,speed: 10.,did_bowler_throw: false, did_batsman_hit: false,game_window: GameWindow { height: windows.single().height(), width: windows.single().width() },direction: Vec3::ZERO, bowler_coord: Vec3 { x: -50., y: -windows.single().height()/2.3, z: 2. }}
-));
+    Ball {is_out_of_bounds:false,did_bounce: false,did_bowler_throw: false, did_batsman_hit: false,game_window: GameWindow { height: 48., width: 48. },velocity: Vec3::ZERO, bowler_coord: Vec3 { x: 0., y: 8.0, z: -8.0 }}));
 
 
 }
@@ -135,11 +199,13 @@ fn bowler_throw(
     mut ball_query: Query<(&mut Ball, &mut Transform), With<Ball>>,
     players: Query<(&Player,&Transform),(With<Player>,Without<Ball>)>,
     time: Res<Time>,
-    game_window: Query<&GameWindow,With<GameWindow>>
+    game_window: Query<&GameWindow,With<GameWindow>>,
+    playing_condition: Query<&PlayingCondition,With<PlayingCondition>>
 ) {
     let ballres=ball_query.get_single_mut();
     if ballres.is_ok() {
         let (mut ball,mut btransform)=ballres.unwrap();
+        //println!("ball is here {:?}",btransform.translation);
         if ball.is_out_of_bounds {
             ball.move_to_baller(&mut btransform.translation);
             ball.is_out_of_bounds=false;
@@ -147,6 +213,7 @@ fn bowler_throw(
         }
         if keyboard_input.just_pressed(KeyCode::KeyG) {
                 
+                //println!("Just pressed");
 
                 let mut batterTranslation=Vec3::ZERO;
                 for (player,transform) in players.iter() {
@@ -154,11 +221,19 @@ fn bowler_throw(
                         batterTranslation=transform.translation;
                     }
                 }
+                let mut velocity=Vec3::ZERO;
 
+                let in_between_pitch_coord=Vec3::new(0.,0.,0.0);
+                if !ball.did_bowler_throw { 
+                    velocity=get_velocity(btransform.translation, in_between_pitch_coord, 0.00001);
+                    //println!("velocity {}",velocity);
+                    velocity=10.*velocity;
+                    //println!("velocity {}",velocity);
+                }
+                ball.velocity=velocity;
+                //println!("velocity {:?}",velocity);
+                ball.throw_ball(*time,&mut btransform,playing_condition.single());
                 ball.did_bowler_throw=true;
-                let direction=get_direction(btransform.translation, batterTranslation, 0.00001);
-                ball.move_object(&mut btransform.translation, direction);
-                ball.direction=direction;
 
             
         }
@@ -172,8 +247,9 @@ fn bowler_throw(
                     }
                 }
 
-                let direction=ball.direction;
-                ball.move_object(&mut btransform.translation, direction);
+                let velocity=ball.velocity;
+
+                ball.throw_ball(*time,&mut btransform,playing_condition.single());
 
         }
     }
